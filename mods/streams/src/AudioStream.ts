@@ -32,6 +32,7 @@ class AudioStream {
   private stream: Readable;
   private socket: net.Socket;
   private isPlaying: boolean = true;
+  private shouldStopPlayback = false;
 
   /**
    * Creates a new AudioStream.
@@ -70,7 +71,7 @@ class AudioStream {
    * @param {string} filePath - The path to the audio file
    * @return {Promise<void>}
    */
-  async play(filePath: string) {
+  async playStaticFile(filePath: string) {
     const fileStream = fs.readFileSync(filePath);
 
     let offset = 0;
@@ -86,6 +87,46 @@ class AudioStream {
       // Wait for 20ms to match the sample rate
       await setTimeout(20);
     }
+  }
+
+  async play(filePath: string) {
+    let offset = 0;
+    let fileSize = 0;
+
+    while (true) {
+      try {
+        const stats = fs.statSync(filePath);
+        fileSize = stats.size;
+
+        if (offset < fileSize) {
+          const sliceSize = Math.min(fileSize - offset, MAX_CHUNK_SIZE);
+          const buffer = Buffer.alloc(sliceSize);
+
+          const fd = fs.openSync(filePath, 'r');
+          fs.readSync(fd, buffer, 0, sliceSize, offset);
+          fs.closeSync(fd);
+
+          const messageBuffer = Message.createSlinMessage(buffer);
+          this.socket.write(messageBuffer);
+
+          offset += sliceSize;
+        }
+
+        // Wait for 20ms to match the sample rate
+        await setTimeout(20);
+      } catch (err) {
+        console.error("Error during playback:", err);
+        break;
+      }
+
+      if (this.shouldStopPlayback) {
+        break;
+      }
+    }
+  }
+
+  setShouldStopPlayback(condition: boolean) {
+    this.shouldStopPlayback = condition;
   }
 
   stopPlayback() {
